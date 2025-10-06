@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -15,17 +16,23 @@ type ProviderInput struct {
 }
 
 func CreateProvider(c *gin.Context) {
+	log.Println("CreateProvider: Function entered")
 	var input ProviderInput
 	if err := c.ShouldBindJSON(&input); err != nil {
+		log.Printf("CreateProvider: ShouldBindJSON error: %v", err)
 		helper.SendErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
+	log.Printf("CreateProvider Input: %+v", input)
+
 	provider := models.Provider{Name: input.Name, Address: input.Address}
 	if err := database.DB.Create(&provider).Error; err != nil {
+		log.Printf("CreateProvider: GORM Create error: %v", err)
 		helper.SendErrorResponse(c, http.StatusInternalServerError, "Failed to create provider: "+err.Error())
 		return
 	}
+	log.Printf("CreateProvider: Provider successfully created in DB: %+v", provider)
 
 	helper.SendSuccessResponse(c, http.StatusCreated, "Provider created successfully", provider)
 }

@@ -6,6 +6,7 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -60,7 +61,17 @@ func CreateTower(c *gin.Context) {
 	// Parse form data
 	latStr := c.PostForm("latitude")
 	lonStr := c.PostForm("longitude")
+	kelurahan := c.PostForm("kelurahan")
+	kecamatan := c.PostForm("kecamatan")
+	address := c.PostForm("address")
+	tipe := c.PostForm("tipe")
+	tinggiStr := c.PostForm("tinggi")
 	providerIDs := c.PostFormArray("provider_ids")
+
+	log.Printf("CreateTower: Received form data: lat=%s, lon=%s, kelurahan=%s, kecamatan=%s, tipe=%s, tinggi=%s, providers=%v", latStr, lonStr, kelurahan, kecamatan, tipe, tinggiStr, providerIDs)
+
+	c.Request.ParseMultipartForm(10 << 20) // 10 MB
+	log.Printf("Full form data: %v", c.Request.Form)
 
 	latitude, err := strconv.ParseFloat(latStr, 64)
 	if err != nil {
@@ -74,10 +85,20 @@ func CreateTower(c *gin.Context) {
 		return
 	}
 
+	var tinggi float64
+	if tinggiStr != "" {
+		tinggi, err = strconv.ParseFloat(tinggiStr, 64)
+		if err != nil {
+			helper.SendErrorResponse(c, http.StatusBadRequest, "Invalid tinggi format")
+			return
+		}
+	}
+
 	// Handle file upload and convert to WebP
 	var photoURL string
 	file, err := c.FormFile("photo")
 	if err == nil { // Photo is provided
+		log.Println("CreateTower: Photo file found, processing...")
 		photoURL, err = processAndSaveWebP(file)
 		if err != nil {
 			helper.SendErrorResponse(c, http.StatusInternalServerError, err.Error())
@@ -104,20 +125,35 @@ func CreateTower(c *gin.Context) {
 	tower := models.Tower{
 		Latitude:  latitude,
 		Longitude: longitude,
+		Kelurahan: kelurahan,
+		Kecamatan: kecamatan,
+		Address:   address,
+		Tinggi:    tinggi,
+		Tipe:      tipe,
 		PhotoURL:  photoURL, // Use the new WebP photo URL
 		Providers: providers,
 		Status:    "active", // Default status
 	}
 
-	if err := database.DB.Create(&tower).Error; err != nil {
-		helper.SendErrorResponse(c, http.StatusInternalServerError, "Failed to create tower: "+err.Error())
+	log.Printf("CreateTower: Attempting to create tower object: %+v", tower)
+
+	dbResult := database.DB.Create(&tower)
+	if dbResult.Error != nil {
+		log.Printf("CreateTower: DB.Create FAILED: %v", dbResult.Error)
+		helper.SendErrorResponse(c, http.StatusInternalServerError, "Failed to create tower: "+dbResult.Error.Error())
 		return
 	}
+
+	log.Printf("CreateTower: DB.Create SUCCEEDED. Rows affected: %d. New Tower ID: %d", dbResult.RowsAffected, tower.ID)
 
 	// Create TowerEvent for creation
 	if err := createTowerEvent(c, tower.ID, "Created", "Tower initially created.", nil, gin.H{
 		"latitude":  tower.Latitude,
 		"longitude": tower.Longitude,
+		"kelurahan": tower.Kelurahan,
+		"kecamatan": tower.Kecamatan,
+		"tinggi":    tower.Tinggi,
+		"tipe":      tower.Tipe,
 		"photo_url": tower.PhotoURL,
 		"providers": providers,
 		"status":    tower.Status,
@@ -145,46 +181,46 @@ func GetTower(c *gin.Context) {
 
 func UpdateTower(c *gin.Context) {
 	var tower models.Tower
-	if err := database.DB.Preload("Providers").First(&tower, c.Param("id")).Error; err != nil {
+	if err := database.DB.First(&tower, c.Param("id")).Error; err != nil {
 		helper.SendErrorResponse(c, http.StatusNotFound, "Tower not found")
 		return
 	}
 
 	// Store old data for event logging
-	oldLatitude := tower.Latitude
-	oldLongitude := tower.Longitude
-	oldPhotoURL := tower.PhotoURL
-	oldProviders := tower.Providers
-
-	// Parse form data
-	latStr := c.PostForm("latitude")
-	lonStr := c.PostForm("longitude")
-	providerIDs := c.PostFormArray("provider_ids")
-
-	latitude, err := strconv.ParseFloat(latStr, 64)
-	if err != nil {
-		helper.SendErrorResponse(c, http.StatusBadRequest, "Invalid latitude format")
-		return
+	oldData := gin.H{
+		"kelurahan": tower.Kelurahan,
+		"kecamatan": tower.Kecamatan,
+		"tinggi":    tower.Tinggi,
+		"tipe":      tower.Tipe,
+		"photo_url": tower.PhotoURL,
 	}
 
-	longitude, err := strconv.ParseFloat(lonStr, 64)
-	if err != nil {
-		helper.SendErrorResponse(c, http.StatusBadRequest, "Invalid longitude format")
-		return
+	// Parse form data for details
+	kelurahan := c.PostForm("kelurahan")
+	kecamatan := c.PostForm("kecamatan")
+	address := c.PostForm("address")
+	tipe := c.PostForm("tipe")
+	tinggiStr := c.PostForm("tinggi")
+
+	var tinggi float64
+	if tinggiStr != "" {
+		var err error
+		tinggi, err = strconv.ParseFloat(tinggiStr, 64)
+		if err != nil {
+			helper.SendErrorResponse(c, http.StatusBadRequest, "Invalid tinggi format")
+			return
+		}
 	}
 
 	// Handle file upload (optional)
 	file, err := c.FormFile("photo")
 	if err == nil { // Photo provided, update it
-		// Delete old photo if it exists
 		if tower.PhotoURL != "" {
 			oldPhotoPath := filepath.Join(".", tower.PhotoURL)
 			if err := os.Remove(oldPhotoPath); err != nil {
 				fmt.Printf("Failed to delete old photo file %s: %v\n", oldPhotoPath, err)
 			}
 		}
-
-		// Process the new file to WebP
 		newPhotoURL, err := processAndSaveWebP(file)
 		if err != nil {
 			helper.SendErrorResponse(c, http.StatusInternalServerError, err.Error())
@@ -196,66 +232,33 @@ func UpdateTower(c *gin.Context) {
 		return
 	}
 
-	// Update tower fields
-	tower.Latitude = latitude
-	tower.Longitude = longitude
-
-	// Update providers association
-	var newProviders []*models.Provider
-	if len(providerIDs) > 0 {
-		var providerModels []models.Provider
-		if err := database.DB.Where(providerIDs).Find(&providerModels).Error; err != nil {
-			helper.SendErrorResponse(c, http.StatusInternalServerError, "Failed to find providers")
-			return
-		}
-		for i := range providerModels {
-			newProviders = append(newProviders, &providerModels[i])
-		}
+	// Update tower detail fields
+	tower.Kelurahan = kelurahan
+	tower.Kecamatan = kecamatan
+	tower.Address = address
+	tower.Tipe = tipe
+	if tinggiStr != "" { // Only update if provided
+		tower.Tinggi = tinggi
 	}
-	database.DB.Model(&tower).Association("Providers").Replace(newProviders)
-
 
 	if err := database.DB.Save(&tower).Error; err != nil {
 		helper.SendErrorResponse(c, http.StatusInternalServerError, "Failed to update tower: "+err.Error())
 		return
 	}
 
-	// Create TowerEvent for generic update
-	changed := false
-	oldData := gin.H{
-		"latitude":  oldLatitude,
-		"longitude": oldLongitude,
-		"photo_url": oldPhotoURL,
-		"providers": oldProviders,
-	}
+	// Create TowerEvent for details update
 	newData := gin.H{
-		"latitude":  tower.Latitude,
-		"longitude": tower.Longitude,
+		"kelurahan": tower.Kelurahan,
+		"kecamatan": tower.Kecamatan,
+		"tinggi":    tower.Tinggi,
+		"tipe":      tower.Tipe,
 		"photo_url": tower.PhotoURL,
-		"providers": tower.Providers,
 	}
 
-	if oldLatitude != tower.Latitude || oldLongitude != tower.Longitude {
-		changed = true
-		if err := createTowerEvent(c, tower.ID, "Relocation", fmt.Sprintf("Tower location updated from (%.6f, %.6f) to (%.6f, %.6f)", oldLatitude, oldLongitude, tower.Latitude, tower.Longitude), oldData, newData); err != nil {
-			fmt.Printf("Failed to create tower event for relocation: %v\n", err)
+	if fmt.Sprintf("%v", oldData) != fmt.Sprintf("%v", newData) {
+		if err := createTowerEvent(c, tower.ID, "DetailsUpdate", "Tower details were updated.", oldData, newData); err != nil {
+			fmt.Printf("Failed to create tower event for details update: %v\n", err)
 		}
-	} else if oldPhotoURL != tower.PhotoURL {
-		changed = true
-		if err := createTowerEvent(c, tower.ID, "PhotoUpdate", "Tower photo updated.", oldData, newData); err != nil {
-			fmt.Printf("Failed to create tower event for photo update: %v\n", err)
-		}
-	} else if !compareProviders(oldProviders, tower.Providers) {
-		changed = true
-		oldProviderNames := getProviderNames(oldProviders)
-		newProviderNames := getProviderNames(tower.Providers)
-		if err := createTowerEvent(c, tower.ID, "OwnershipChange", fmt.Sprintf("Tower providers updated from %s to %s", oldProviderNames, newProviderNames), oldData, newData); err != nil {
-			fmt.Printf("Failed to create tower event for provider update: %v\n", err)
-		}
-	}
-
-	if !changed {
-		// No significant change
 	}
 
 	helper.SendSuccessResponse(c, http.StatusOK, "Tower updated successfully", tower)

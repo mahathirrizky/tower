@@ -9,14 +9,13 @@ import (
 func TowerRoutes(router *gin.Engine) {
 	// Public routes
 	router.GET("/api/towers", controllers.GetTowers)
-	router.GET("/api/towers/", controllers.GetTowers) // Handle with trailing slash
 	router.GET("/api/towers/:id", controllers.GetTower)
 
 	// Authorized routes
 	authorized := router.Group("/api/towers")
 	authorized.Use(middleware.AuthMiddleware())
 	{
-		authorized.POST("/", controllers.CreateTower)
+		authorized.POST("", controllers.CreateTower)
 		authorized.PUT("/:id", controllers.UpdateTower)
 		authorized.DELETE("/:id", controllers.DeleteTower)
 

@@ -1,8 +1,6 @@
 package controllers
 
 import (
-	"bytes"
-	"io"
 	"log"
 	"net/http"
 	"regexp"
@@ -48,11 +46,6 @@ type LoginInput struct {
 }
 
 func Login(c *gin.Context) {
-	// Log raw request body for debugging
-	body, _ := c.GetRawData()
-	log.Printf("Login Request Raw Body: %s", string(body))
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(body)) // Restore body for subsequent reads
-
 	var input LoginInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		log.Printf("Login Request Binding Error: %v", err)

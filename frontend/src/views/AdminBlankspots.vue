@@ -37,7 +37,7 @@
       </template>
     </Card>
 
-    <Dialog v-model:visible="blankspotAreaDialog" :style="{ width: '800px' }" header="Blankspot Area Details" :modal="true" class="p-fluid" @show="initMap" @hide="destroyMap">
+    <Dialog v-model:visible="blankspotAreaDialog" :style="{ width: '800px' }" header="Blankspot Area Details" :modal="true" class="p-fluid" @show="initMap" @hide="hideBlankspotAreaDialog">
       <div class="field my-4">
         <FloatLabel variant="on">
           <InputText id="name" v-model.trim="blankspotArea.name" required="true" autofocus :class="{ 'p-invalid': submitted && !blankspotArea.name }" fluid />
@@ -54,14 +54,18 @@
       </div>
       <div class="field my-4">
         <FloatLabel variant="on">
-          <Select id="type" fluid v-model="blankspotArea.type" :options="blankspotTypes" placeholder="Select a Type" required="true" :class="{ 'p-invalid': submitted && !blankspotArea.type }" @change="updateDefaultColor" />
+          <Select id="type" fluid v-model="blankspotArea.type" :options="blankspotTypes" placeholder="Select a Type" required="true" :class="{ 'p-invalid': submitted && !blankspotArea.type }" />
           <label for="type">Type</label>
         </FloatLabel>
         <small class="p-error" v-if="submitted && !blankspotArea.type">Type is required.</small>
       </div>
-      <!-- Removed ColorPicker section -->
+      
       <div class="field my-4">
         <label>Draw Blankspot Area on Map</label>
+        <div class="flex gap-2 mb-2">
+            <Button :label="isDrawing ? 'Selesai Menggambar' : 'Mulai Menggambar'" :icon="isDrawing ? 'pi pi-check' : 'pi pi-pencil'" @click="toggleDrawing" />
+            <Button label="Hapus Gambar" icon="pi pi-trash" class="p-button-danger" @click="clearDrawing" :disabled="drawnCoordinates.length === 0" />
+        </div>
         <div id="blankspotMap" style="height: 300px; width: 100%;"></div>
       </div>
       <div class="field my-4">
@@ -102,12 +106,9 @@ import ToggleSwitch from 'primevue/toggleswitch';
 import Dialog from 'primevue/dialog';
 import InputText from 'primevue/inputtext';
 import Select from 'primevue/select';
-
 import FloatLabel from 'primevue/floatlabel';
 import 'leaflet/dist/leaflet.css';
-import 'leaflet-draw/dist/leaflet.draw.css'; // Import Leaflet.draw CSS
 import L from 'leaflet';
-import 'leaflet-draw'; // Import Leaflet.draw JS
 
 // Stores
 const blankspotStore = useBlankspotStore();
@@ -126,14 +127,15 @@ const blankspotAreaDialog = ref(false);
 const deleteBlankspotAreaDialog = ref(false);
 const blankspotArea = ref({});
 const submitted = ref(false);
-const blankspotTypes = ref(['Blankspot', 'Weak Signal']); // Options for the Type dropdown
+const blankspotTypes = ref(['Blankspot', 'Weak Signal']);
 
 const isDarkMode = computed(() => uiStore.isDarkMode);
 
-// Map instance
+// Map instance & Manual Drawing State
 let mapInstance = null;
-let editableLayer = null; // Layer to hold drawn items
-let drawControl = null; // Leaflet.draw control
+let drawnPolygon = null;
+const isDrawing = ref(false);
+const drawnCoordinates = ref([]);
 
 // Lifecycle
 onMounted(() => {
@@ -142,30 +144,19 @@ onMounted(() => {
 
 // Watch for blankspotArea.type changes to update default color
 watch(() => blankspotArea.value.type, (newType) => {
-  updateDefaultColor(newType);
-});
-
-// Methods
-const updateDefaultColor = (type) => {
-  if (type === 'Blankspot') {
+  if (newType === 'Blankspot') {
     blankspotArea.value.color = '#FF0000'; // Red
-  } else if (type === 'Weak Signal') {
+  } else if (newType === 'Weak Signal') {
     blankspotArea.value.color = '#FFFF00'; // Yellow
   } else {
     blankspotArea.value.color = '#FF0000'; // Default to red
   }
-  // Update color of current polygon if drawing
-  if (editableLayer && editableLayer.getLayers().length > 0) {
-    editableLayer.eachLayer(layer => {
-      if (layer instanceof L.Polygon) {
-        layer.setStyle({ color: blankspotArea.value.color, fillColor: blankspotArea.value.color });
-      }
-    });
-  }
-};
+  updateDrawnPolygon(); // Update color of current polygon if drawing
+});
 
+// Methods
 const openNewBlankspotAreaDialog = () => {
-  blankspotArea.value = { name: '', kelurahan: '', coordinates: '[]', type: 'Blankspot', color: '#FF0000' }; // Default type and color
+  blankspotArea.value = { name: '', kelurahan: '', coordinates: '[]', type: 'Blankspot', color: '#FF0000' };
   submitted.value = false;
   blankspotAreaDialog.value = true;
 };
@@ -173,19 +164,18 @@ const openNewBlankspotAreaDialog = () => {
 const hideBlankspotAreaDialog = () => {
   blankspotAreaDialog.value = false;
   submitted.value = false;
-  // Clear drawn items when dialog is hidden
-  if (editableLayer) {
-    editableLayer.clearLayers();
-  }
-  // Remove draw control
-  if (drawControl) {
-    mapInstance.removeControl(drawControl);
-    drawControl = null;
+  isDrawing.value = false;
+  if (mapInstance) {
+      mapInstance.off('click', handleMapClick);
+      mapInstance.getContainer().style.cursor = '';
   }
 };
 
 const saveBlankspotArea = async () => {
   submitted.value = true;
+  if (isDrawing.value) { // If user is still in drawing mode, finish it first
+    toggleDrawing();
+  }
   if (blankspotArea.value.name && blankspotArea.value.kelurahan && blankspotArea.value.coordinates && blankspotArea.value.type) {
     try {
       if (blankspotArea.value.ID) {
@@ -229,84 +219,72 @@ const deleteBlankspotArea = async () => {
 // Map Methods
 const initMap = () => {
   nextTick(() => {
-    if (mapInstance) {
-      mapInstance.remove();
-    }
-    mapInstance = L.map('blankspotMap').setView([-8.4601, 118.7267], 13); // Centered on Bima
+    if (mapInstance) mapInstance.remove();
+    mapInstance = L.map('blankspotMap').setView([-8.4601, 118.7267], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(mapInstance);
 
-    editableLayer = new L.FeatureGroup();
-    mapInstance.addLayer(editableLayer);
-
-    // Initialize draw control
-    drawControl = new L.Control.Draw({
-      edit: {
-        featureGroup: editableLayer,
-        poly: {
-          allowIntersection: false
-        }
-      },
-      draw: {
-        polygon: {
-          allowIntersection: false,
-          showArea: true,
-          shapeOptions: {
-            color: blankspotArea.value.color,
-            fillColor: blankspotArea.value.color,
-            fillOpacity: 0.3,
-            opacity: 0.5
-          }
-        },
-        polyline: false,
-        rectangle: false,
-        circle: false,
-        marker: false,
-        circlemarker: false
-      }
-    });
-    mapInstance.addControl(drawControl);
-
     // Load existing polygon if editing
-    if (blankspotArea.value.coordinates && blankspotArea.value.coordinates !== '[]') {
-      try {
-        const coords = JSON.parse(blankspotArea.value.coordinates);
-        const polygon = L.polygon(coords, { color: blankspotArea.value.color, fillColor: blankspotArea.value.color, fillOpacity: 0.3, opacity: 0.5 });
-        editableLayer.addLayer(polygon);
-        mapInstance.fitBounds(polygon.getBounds());
-      } catch (e) {
-        console.error("Error parsing coordinates:", e);
+    try {
+      const coords = JSON.parse(blankspotArea.value.coordinates);
+      drawnCoordinates.value = coords;
+      updateDrawnPolygon();
+      if(drawnPolygon) {
+        mapInstance.fitBounds(drawnPolygon.getBounds());
       }
+    } catch (e) {
+      drawnCoordinates.value = [];
+      updateDrawnPolygon();
     }
-
-    // Handle draw events
-    mapInstance.on(L.Draw.Event.CREATED, (e) => {
-      const layer = e.layer;
-      editableLayer.addLayer(layer);
-      blankspotArea.value.coordinates = JSON.stringify(layer.getLatLngs()[0].map(ll => [ll.lat, ll.lng]));
-    });
-
-    mapInstance.on(L.Draw.Event.EDITED, (e) => {
-      e.layers.eachLayer(layer => {
-        if (layer instanceof L.Polygon) {
-          blankspotArea.value.coordinates = JSON.stringify(layer.getLatLngs()[0].map(ll => [ll.lat, ll.lng]));
-        }
-      });
-    });
-
-    mapInstance.on(L.Draw.Event.DELETED, () => {
-      blankspotArea.value.coordinates = '[]';
-    });
   });
 };
 
-const destroyMap = () => {
-  if (mapInstance) {
-    mapInstance.remove();
-    mapInstance = null;
-    editableLayer = null;
-    drawControl = null;
+const toggleDrawing = () => {
+  isDrawing.value = !isDrawing.value;
+  if (isDrawing.value) {
+    mapInstance.on('click', handleMapClick);
+    mapInstance.getContainer().style.cursor = 'crosshair';
+  } else {
+    mapInstance.off('click', handleMapClick);
+    mapInstance.getContainer().style.cursor = '';
+    if (drawnCoordinates.value.length > 0) {
+      blankspotArea.value.coordinates = JSON.stringify(drawnCoordinates.value);
+    }
   }
 };
+
+const handleMapClick = (e) => {
+  if (!isDrawing.value) return;
+  const latlng = [e.latlng.lat, e.latlng.lng];
+  drawnCoordinates.value.push(latlng);
+  
+  // BARIS TAMBAHAN: Langsung update input field
+  blankspotArea.value.coordinates = JSON.stringify(drawnCoordinates.value);
+
+  updateDrawnPolygon();
+};
+
+const updateDrawnPolygon = () => {
+  if (drawnPolygon) {
+    mapInstance.removeLayer(drawnPolygon);
+  }
+  if (drawnCoordinates.value.length > 0) {
+    drawnPolygon = L.polygon(drawnCoordinates.value, { 
+      color: blankspotArea.value.color, 
+      fillColor: blankspotArea.value.color, 
+      fillOpacity: 0.3 
+    }).addTo(mapInstance);
+  }
+};
+
+const clearDrawing = () => {
+  drawnCoordinates.value = [];
+  if (drawnPolygon) {
+    mapInstance.removeLayer(drawnPolygon);
+    drawnPolygon = null;
+  }
+  blankspotArea.value.coordinates = '[]';
+};
+
 </script>

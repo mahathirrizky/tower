@@ -9,7 +9,7 @@ export const useDataStore = defineStore('data', {
   actions: {
     async fetchTowers() {
       try {
-        const response = await apiClient.get('/towers');
+        const response = await apiClient.get(`/towers?_=${new Date().getTime()}`);
         this.towers = response.data.data;
       } catch (error) {
         console.error('Error fetching towers:', error);
@@ -23,7 +23,7 @@ export const useDataStore = defineStore('data', {
             'Content-Type': 'multipart/form-data'
           }
         });
-        this.towers.push(response.data.data);
+        // State is updated by calling fetchTowers() in the component
         return response.data;
       } catch (error) {
         console.error('Error creating tower:', error);
@@ -37,10 +37,7 @@ export const useDataStore = defineStore('data', {
             'Content-Type': 'multipart/form-data'
           }
         });
-        const index = this.towers.findIndex(tower => tower.ID === id);
-        if (index !== -1) {
-          this.towers[index] = response.data.data;
-        }
+        // State is updated by calling fetchTowers() in the component
         return response.data;
       } catch (error) {
         console.error('Error updating tower:', error);
@@ -50,7 +47,7 @@ export const useDataStore = defineStore('data', {
     async deleteTower(id) {
       try {
         await apiClient.delete(`/towers/${id}`);
-        this.towers = this.towers.filter(tower => tower.ID !== id);
+        // State is updated by calling fetchTowers() in the component
       } catch (error) {
         console.error('Error deleting tower:', error);
         throw error;
@@ -69,7 +66,7 @@ export const useDataStore = defineStore('data', {
     async createProvider(providerData) {
       try {
         const response = await apiClient.post('/providers', providerData);
-        this.providers.push(response.data.data);
+        // For simplicity, we can refetch providers in the component as well
         return response.data;
       } catch (error) {
         console.error('Error creating provider:', error);
@@ -79,10 +76,7 @@ export const useDataStore = defineStore('data', {
     async updateProvider(id, providerData) {
       try {
         const response = await apiClient.put(`/providers/${id}`, providerData);
-        const index = this.providers.findIndex(provider => provider.ID === id);
-        if (index !== -1) {
-          this.providers[index] = response.data.data;
-        }
+        // For simplicity, we can refetch providers in the component as well
         return response.data;
       } catch (error) {
         console.error('Error updating provider:', error);
@@ -92,9 +86,19 @@ export const useDataStore = defineStore('data', {
     async deleteProvider(id) {
       try {
         await apiClient.delete(`/providers/${id}`);
-        this.providers = this.providers.filter(provider => provider.ID !== id);
+        // For simplicity, we can refetch providers in the component as well
       } catch (error) {
         console.error('Error deleting provider:', error);
+        throw error;
+      }
+    },
+
+    async permanentDeleteTower(towerId) {
+      try {
+        await apiClient.delete(`/towers/${towerId}`);
+        // State is updated by calling fetchTowers() in the component
+      } catch (error) {
+        console.error('Error permanently deleting tower:', error);
         throw error;
       }
     },
@@ -102,11 +106,7 @@ export const useDataStore = defineStore('data', {
     async changeTowerOwnership(towerId, newProviderId) {
       try {
         const response = await apiClient.put(`/towers/${towerId}/ownership`, { new_provider_id: newProviderId });
-        // Update the specific tower in the state
-        const index = this.towers.findIndex(tower => tower.ID === towerId);
-        if (index !== -1) {
-          this.towers[index] = response.data.data; // Assuming backend returns updated tower
-        }
+        // State is updated by calling fetchTowers() in the component
         return response.data;
       } catch (error) {
         console.error('Error changing tower ownership:', error);
@@ -116,11 +116,7 @@ export const useDataStore = defineStore('data', {
     async relocateTower(towerId, latitude, longitude) {
       try {
         const response = await apiClient.put(`/towers/${towerId}/relocate`, { latitude, longitude });
-        // Update the specific tower in the state
-        const index = this.towers.findIndex(tower => tower.ID === towerId);
-        if (index !== -1) {
-          this.towers[index] = response.data.data; // Assuming backend returns updated tower
-        }
+        // State is updated by calling fetchTowers() in the component
         return response.data;
       } catch (error) {
         console.error('Error relocating tower:', error);
@@ -130,13 +126,7 @@ export const useDataStore = defineStore('data', {
     async dismantleTower(towerId) {
       try {
         const response = await apiClient.put(`/towers/${towerId}/dismantle`);
-        // Update the specific tower in the state (status to dismantled)
-        const index = this.towers.findIndex(tower => tower.ID === towerId);
-        if (index !== -1) {
-          this.towers[index] = response.data.data; // Assuming backend returns updated tower with status
-        }
-        // Optionally remove from active towers list if UI only shows active
-        // this.towers = this.towers.filter(tower => tower.ID !== towerId);
+        // State is updated by calling fetchTowers() in the component
         return response.data;
       } catch (error) {
         console.error('Error dismantling tower:', error);

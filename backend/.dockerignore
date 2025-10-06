@@ -13,9 +13,7 @@ tower_tracker.db
 # Ignore editor/IDE files
 .vscode/
 .idea/
-*.swp
-*.swo
-
+*.swp;
 # Ignore logs
 *.log
 

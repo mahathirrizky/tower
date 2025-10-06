@@ -2,6 +2,7 @@ package database
 
 import (
 	"log"
+	"os"
 
 	"github.com/user/tower-tracker-bima/backend/models"
 	"golang.org/x/crypto/bcrypt"
@@ -12,14 +13,20 @@ import (
 var DB *gorm.DB
 
 func ConnectDatabase() {
-	database, err := gorm.Open(sqlite.Open("tower_tracker.db"), &gorm.Config{})
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "backend/tower_tracker.db" // Default for local development
+	}
+
+	log.Printf("Attempting to connect to database at: %s", dbPath)
+	database, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
-		log.Fatal("Failed to connect to database!", err)
+		log.Fatalf("Failed to connect to database at %s: %v", dbPath, err)
 	}
 
 	err = database.AutoMigrate(&models.User{}, &models.Provider{}, &models.Tower{}, &models.BlankspotArea{}, &models.TowerEvent{})
 	if err != nil {
-		log.Fatal("Failed to migrate database!", err)
+		log.Fatalf("Failed to migrate database: %v", err)
 	}
 
 	DB = database

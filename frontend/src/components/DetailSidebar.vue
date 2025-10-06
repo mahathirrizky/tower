@@ -51,6 +51,22 @@
                     <span class="font-semibold text-sm text-gray-500">Longitude</span>
                     <span class="text-lg">{{ item.longitude || 'N/A' }}</span>
                   </div>
+                  <div class="flex flex-col">
+                    <span class="font-semibold text-sm text-gray-500">Kecamatan</span>
+                    <span class="text-lg">{{ item.kecamatan || 'N/A' }}</span>
+                  </div>
+                  <div class="flex flex-col">
+                    <span class="font-semibold text-sm text-gray-500">Kelurahan</span>
+                    <span class="text-lg">{{ item.kelurahan || 'N/A' }}</span>
+                  </div>
+                  <div class="flex flex-col">
+                    <span class="font-semibold text-sm text-gray-500">Tipe Tower</span>
+                    <span class="text-lg">{{ item.tipe || 'N/A' }}</span>
+                  </div>
+                  <div class="flex flex-col">
+                    <span class="font-semibold text-sm text-gray-500">Tinggi</span>
+                    <span class="text-lg">{{ item.tinggi ? item.tinggi + ' m' : 'N/A' }}</span>
+                  </div>
                 </div>
                 <div class="flex flex-col">
                   <span class="font-semibold text-sm text-gray-500">Status</span>

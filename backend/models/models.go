@@ -21,11 +21,16 @@ type Provider struct {
 // Tower represents the telecommunication tower model
 type Tower struct {
 	gorm.Model
-	PhotoURL  string      `json:"photo_url"`
-	Latitude  float64     `json:"latitude"`
-	Longitude float64     `json:"longitude"`
-	Status    string      `json:"status" gorm:"default:'active'"` // New field: "active", "dismantled", "moved"
-	Providers []*Provider `json:"providers,omitempty" gorm:"many2many:provider_towers;"`
+	PhotoURL    string      `json:"photo_url"`
+	Latitude    float64     `json:"latitude"`
+	Longitude   float64     `json:"longitude"`
+	Kelurahan   string      `json:"kelurahan"`
+	Kecamatan   string      `json:"kecamatan"`
+	Address     string      `json:"address"`
+	Tinggi      float64     `json:"tinggi"`
+	Tipe        string      `json:"tipe"`
+	Status      string      `json:"status" gorm:"default:'active'"`
+	Providers   []*Provider `json:"providers,omitempty" gorm:"many2many:provider_towers;"`
 }
 
 // BlankspotArea represents an area on the map with weak signal or no signal
